@@ -17,475 +17,248 @@ const char *username = "kolb16";
 
 #include "stm32f0xx.h"
 #include <math.h> // for M_PI
+#include <stdio.h>
+#include <stdint.h>
 
 void nano_wait(int);
+void internal_clock();
+void show_char(int col, char n);
 
-// 16-bits per digit.
-// The most significant 8 bits are the digit number.
-// The least significant 8 bits are the segments to illuminate.
-uint16_t msg[8] = {0x0000, 0x0100, 0x0200, 0x0300, 0x0400, 0x0500, 0x0600, 0x0700};
+uint16_t msg[8] = { 0x0000,0x0100,0x0200,0x0300,0x0400,0x0500,0x0600,0x0700 };
 extern const char font[];
-// Print an 8-character string on the 8 digits
-void print(const char str[]);
-// Print a floating-point value.
-void printfloat(float f);
 
-void autotest(void);
+uint16_t mode[34] = {
+        0x002, // Command to set the cursor at the first position line 1
+        0x200+'C', 0x200+'u', 0x200+'r', 0x200+'r', 0x200+'e', 0x200+'n', 0x200+'t', 0x200+' ',
+        0x200+'W', 0x200+'i', 0x200+'n', 0x200+'d',  0x200+'i',  0x200+'n', 0x200+'g', 0x200+' ',
+        0x0c0, // Command to set the cursor at the first position line 2
+        0x200+'S', 0x200+'p', 0x200+'e', 0x200+'e', 0x200+'d', + 0x200+':', 0x200+' ', 0x200 + '1',
+        0x200+'0', 0x200+'0', 0x200+' ', 0x200+'R', + 0x200+'P', 0x200+'M', 0x200+' ', 0x200+' ',
+};
 
-//============================================================================
-// PWM Lab Functions
-//============================================================================
-void setup_tim3(void)
+void init_spi1()
 {
-    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
-    RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
-
-    GPIOC->MODER &= ~0xFF000;
-    GPIOC->MODER |= 0xAA000;
-    GPIOC->AFR[1] &= ~0xFF;
-    TIM3->PSC = 47999;
-    TIM3->ARR = 999;
-    TIM3->CCMR1 |= 0x6060;
-    TIM3->CCMR2 |= 0x6060;
-    TIM3->CCER |= 0x1111;
-    TIM3->CCR1 = 800;
-    TIM3->CCR2 = 600;
-    TIM3->CCR3 = 400;
-    TIM3->CCR4 = 200;
-
-    TIM3->CR1 |= TIM_CR1_CEN;
-}
-
-void setup_tim1(void)
-{
-    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
-    GPIOA->MODER &= ~0xFF0000;
-    GPIOA->MODER |= 0xAA0000;
-    GPIOA->AFR[1] |= 0x2222;
-    TIM1->BDTR |= 0x8000;
-    TIM1->PSC = 0;
-    TIM1->ARR = 2399;
-    TIM1->CCMR1 |= 0x6860;
-    TIM1->CCMR2 |= 0x6860;
-    TIM1->CCER |= 0x1111;
-    TIM1->CR1 |= TIM_CR1_CEN;
+    GPIOA->MODER |= 0x80008800;
+    GPIOA->AFR[0] &= ~(0xF0F00000);
+    GPIOA->AFR[1] &= ~(0xF0000000);
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    SPI1->CR1 &= ~(0x40);
+    SPI1->CR1 |= 0x0038;
+    SPI1->CR2 |= 0x0900;
+    SPI1->CR2 &= ~(0x0600);
+    SPI1->CR2 |= 0x000E;
+    SPI1->CR1 |= 0x0044;
 }
 
-int getrgb(void);
-
-// Helper function for you
-// Accept a byte in BCD format and convert it to decimal
-uint8_t bcd2dec(uint8_t bcd)
+void spi_cmd(unsigned int data)
 {
-    // Lower digit
-    uint8_t dec = bcd & 0xF;
-
-    // Higher digit
-    dec += 10 * (bcd >> 4);
-    return dec;
+    while (!(SPI1->SR & 0x2)){
+    }
+    SPI1->DR = data;
 }
 
-void setrgb(int rgb)
+void spi1_init_oled()
 {
-    uint8_t b = bcd2dec(rgb & 0xFF);
-    uint8_t g = bcd2dec((rgb >> 8) & 0xFF);
-    uint8_t r = bcd2dec((rgb >> 16) & 0xFF);
+    nano_wait(1000000);
+    spi_cmd(0x38);
+    spi_cmd(0x08);
+    spi_cmd(0x01);
+    nano_wait(2000000);
+    spi_cmd(0x06);
+    spi_cmd(0x02);
+    spi_cmd(0x0C);
+}
 
-    // TODO: Assign values to TIM1->CCRx registers
-    // Remember these are all percentages
-    // Also, LEDs are on when the corresponding PWM output is low
-    // so you might want to invert the numbers.
-    TIM1->CCR1 = 2400 - r * 24;
-    TIM1->CCR2 = 2400 - g * 24;
-    TIM1->CCR3 = 2400 - b * 24;
+void spi1_setup_dma(void)
+{
+    DMA1_Channel3->CCR &= ~(0x1);
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+    DMA1_Channel3->CMAR = mode;
+    DMA1_Channel3->CPAR = (&(SPI1->DR));
+    DMA1_Channel3->CNDTR = 34;
+    DMA1_Channel3->CCR |= (0x5B0);
+    SPI1->CR2 |= 0x80;
+}
+
+void spi1_enable_dma(void)
+{
+    DMA1_Channel3->CCR |= 0x1;
+}
+
+int adc_to_rpm(int adc){
+    //adc 0->4095
+    return (int)(((float)adc)/40.95);
+}
+
+void setup_adc(void) {
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+    GPIOA->MODER |= 0xC;
+    ADC1->CFGR2 &= ~(0xC0000000);
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    RCC->CR2 |= RCC_CR2_HSI14ON;
+    while(RCC->CR2 & 0x2 == 0)
+    {
+        nano_wait(1);
+    }
+    ADC1->CR |= ADC_CR_ADEN;
+    ADC1->CHSELR = 0;
+    while((ADC1->ISR & ADC_ISR_ADRDY) == 0)
+    {
+        nano_wait(1);
+    }
+    ADC1->CHSELR |= ADC_CHSELR_CHSEL1; //PA1
+    while((ADC1->ISR & ADC_ISR_ADRDY) == 0)
+    {
+        nano_wait(1);
+    }
 }
 
 //============================================================================
-// Lab 4 code
-// Add in your functions from previous lab
+// Varables for boxcar averaging.
 //============================================================================
-
-// Part 3: Analog-to-digital conversion for a volume level.
-uint32_t volume = 2400;
-
-// Variables for boxcar averaging.
 #define BCSIZE 32
 int bcsum = 0;
 int boxcar[BCSIZE];
 int bcn = 0;
-
-void dialer(void);
-
-// Parameters for the wavetable size and expected synthesis rate.
-#define N 1000
-#define RATE 20000
-short int wavetable[N];
-int step0 = 0;
-int offset0 = 0;
-int step1 = 0;
-int offset1 = 0;
-
-//============================================================================
-// enable_ports()
-//============================================================================
-void enable_ports(void)
-{
-    // Enable the clock to GPIOB and GPIOC
-    RCC->AHBENR |= RCC_AHBENR_GPIOBEN | RCC_AHBENR_GPIOCEN;
-
-    GPIOB->MODER &= ~0xFFFFF;
-    GPIOB->MODER |= 0x155555;
-
-    GPIOC->MODER &= ~0xFF00;
-    GPIOC->MODER |= 0x5500;
-
-    GPIOC->OTYPER |= 0xF0;
-
-    GPIOC->MODER &= ~0xFF;
-    GPIOC->PUPDR &= ~0xFF;
-    GPIOC->PUPDR |= 0x55;
-}
-
-//============================================================================
-// setup_dma() + enable_dma()
-//============================================================================
-void setup_dma(void)
-{
-    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
-
-    DMA1_Channel5->CCR &= ~DMA_CCR_EN;
-    DMA1_Channel5->CMAR = msg;
-    DMA1_Channel5->CPAR = &GPIOB->ODR;
-    DMA1_Channel5->CNDTR = 8;
-
-    DMA1_Channel5->CCR = 0x000005B0;
-}
-
-void enable_dma(void)
-{
-    DMA1_Channel5->CCR |= DMA_CCR_EN;
-}
-
-//============================================================================
-// init_tim15()
-//============================================================================
-void init_tim15(void)
-{
-    RCC->APB2ENR |= RCC_APB2ENR_TIM15EN;
-
-    TIM15->PSC = 47;
-    TIM15->ARR = 999;
-
-    TIM15->DIER |= TIM_DIER_UDE;
-    TIM15->CR1 |= TIM_CR1_CEN;
-}
-
-//=============================================================================
-// Part 2: Debounced keypad scanning.
-//=============================================================================
-
-uint8_t col; // the column being scanned
-
-void drive_column(int);                 // energize one of the column outputs
-int read_rows();                        // read the four row inputs
-void update_history(int col, int rows); // record the buttons of the driven column
-char get_key_event(void);               // wait for a button event (press or release)
-char get_keypress(void);                // wait for only a button press event.
-float getfloat(void);                   // read a floating-point number from keypad
-void show_keys(void);                   // demonstrate get_key_event()
-
-//============================================================================
-// The Timer 7 ISR
-//============================================================================
-void TIM7_IRQHandler(void)
-{
-    TIM7->SR &= ~TIM_SR_UIF;
-
-    int rows = read_rows();
-    update_history(col, rows);
-    col = (col + 1) & 3;
-    drive_column(col);
-}
-
-//============================================================================
-// init_tim7()
-//============================================================================
-void init_tim7(void)
-{
-    RCC->APB1ENR |= RCC_APB1ENR_TIM7EN;
-
-    TIM7->PSC = 47;
-    TIM7->ARR = 999;
-
-    TIM7->DIER |= TIM_DIER_UIE;
-    TIM7->CR1 |= TIM_CR1_CEN;
-
-    NVIC_EnableIRQ(TIM7_IRQn);
-}
-
-//============================================================================
-// setup_adc()
-//============================================================================
-void setup_adc(void)
-{
-    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
-    GPIOA->MODER |= 0xC;
-
-    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-
-    RCC->CR2 |= RCC_CR2_HSI14ON;
-    while ((RCC->CR2 & RCC_CR2_HSI14RDY) == 0)
-    {
-    };
-
-    ADC1->CR |= ADC_CR_ADEN;
-    while ((ADC1->ISR & ADC_ISR_ADRDY) == 0)
-    {
-    };
-
-    ADC1->CHSELR = ADC_CHSELR_CHSEL1;
-    while ((ADC1->ISR & ADC_ISR_ADRDY) == 0)
-    {
-    };
-}
+uint32_t adc_val = 2048;
 
 //============================================================================
 // Timer 2 ISR
 //============================================================================
 // Write the Timer 2 ISR here.  Be sure to give it the right name.
-void TIM2_IRQHandler(void)
-{
+void TIM2_IRQHandler(void){
     TIM2->SR &= ~TIM_SR_UIF;
     ADC1->CR |= ADC_CR_ADSTART;
-
-    while ((ADC1->ISR & ADC_ISR_EOC) == 0)
+    while(ADC_ISR_EOC == 0)
     {
-    };
-
+        nano_wait(1);
+    }
     bcsum -= boxcar[bcn];
     bcsum += boxcar[bcn] = ADC1->DR;
     bcn += 1;
     if (bcn >= BCSIZE)
         bcn = 0;
-    volume = bcsum / BCSIZE;
+    adc_val = bcsum / BCSIZE;
 }
+
 
 //============================================================================
 // init_tim2()
 //============================================================================
-void init_tim2(void)
-{
+void init_tim2(void) {
     RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
-
-    TIM2->PSC = 479;
-    TIM2->ARR = 9999;
-
+    TIM2->ARR = (48000) - 1;
+    TIM2->PSC = 99;
     TIM2->DIER |= TIM_DIER_UIE;
+    NVIC->ISER[0] = 1 << TIM2_IRQn;
     TIM2->CR1 |= TIM_CR1_CEN;
+}
 
-    NVIC_EnableIRQ(TIM2_IRQn);
-    NVIC_SetPriority(TIM2_IRQn, 3);
+void enable_7SEG_ports(){
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+    GPIOB->MODER &= ~(0x003FFFFF);
+    GPIOB->MODER |= 0x00155555;
+}
+
+void setup_dma(void) {
+    DMA1_Channel5->CCR &= ~(0x1);
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+    DMA1_Channel5->CMAR = msg;
+    DMA1_Channel5->CPAR = &(GPIOB->ODR);
+    DMA1_Channel5->CNDTR = 8;
+    //DMA1->CCR &= ~(0x50);
+    DMA1_Channel5->CCR |= 0x000005B0;
+}
+
+void enable_dma(void) {
+    DMA1_Channel5->CCR |= (0x1);
 }
 
 //============================================================================
-// setup_dac()
+// init_tim15()
 //============================================================================
-void setup_dac(void)
-{
-    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
-
-    GPIOA->MODER |= 0x300;
-
-    RCC->APB1ENR |= RCC_APB1ENR_DACEN;
-
-    DAC->CR |= 0b000 << 3;
-    DAC->CR |= DAC_CR_TEN1;
-    DAC->CR |= DAC_CR_EN1;
+void init_tim15(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_TIM15EN;
+    TIM15->DIER |= 0x100;
+    TIM15->PSC = 0;
+    TIM15->ARR = (48000-1);
+    //NVIC->ISER |= TIM15_IRQn;
+    //en
+    TIM15->CR1 |= 0x1;
 }
 
-//============================================================================
-// Timer 6 ISR
-//============================================================================
-// Write the Timer 6 ISR here.  Be sure to give it the right name.
-void TIM6_DAC_IRQHandler(void)
-{
-    //     increment offset0 by step0
-    // increment offset1 by step1
-    // if offset0 is >= (N << 16)
-    //     decrement offset0 by (N << 16)
-    // if offset1 is >= (N << 16)
-    //     decrement offset1 by (N << 16)
-
-    // int samp = sum of wavetable[offset0>>16] and wavetable[offset1>>16]
-    // multiply samp by volume
-    // shift samp right by 17 bits to ensure it's in the right format for `DAC_DHR12R1`
-    // increment samp by 2048
-    // copy samp to DAC->DHR12R1
-
-    TIM6->SR &= ~TIM_SR_UIF;
-
-    offset0 += step0;
-    if (offset0 >= (N << 16))
-    {
-        offset0 -= (N << 16);
-    }
-    offset1 += step1;
-    if (offset1 >= (N << 16))
-    {
-        offset1 -= (N << 16);
-    }
-    int samp = (wavetable[offset0 >> 16] + wavetable[offset1 >> 16]);
-    samp *= volume;
-    samp = samp >> 18;
-    samp += 1200;
-    TIM1->CCR4 = samp;
-}
-
-//============================================================================
-// init_tim6()
-//============================================================================
-void init_tim6(void)
-{
-    RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
-
-    TIM6->PSC = 47;
-    TIM6->ARR = ((48000000 / RATE) / 48) - 1;
-    TIM6->DIER |= TIM_DIER_UIE;
-    TIM6->CR1 |= TIM_CR1_CEN;
-
-    NVIC_EnableIRQ(TIM6_DAC_IRQn);
-}
-
-//===========================================================================
-// init_wavetable()
-// Write the pattern for a complete cycle of a sine wave into the
-// wavetable[] array.
-//===========================================================================
-void init_wavetable(void)
-{
-    for (int i = 0; i < N; i++)
-        wavetable[i] = 32767 * sin(2 * M_PI * i / N);
-}
-
-//============================================================================
-// set_freq()
-//============================================================================
-void set_freq(int chan, float f)
-{
-    if (chan == 0)
-    {
-        if (f == 0.0)
-        {
-            step0 = 0;
-            offset0 = 0;
-        }
-        else
-            step0 = (f * N / RATE) * (1 << 16);
-    }
-    if (chan == 1)
-    {
-        if (f == 0.0)
-        {
-            step1 = 0;
-            offset1 = 0;
-        }
-        else
-            step1 = (f * N / RATE) * (1 << 16);
-    }
-}
-
-//============================================================================
-// All the things you need to test your subroutines.
-//============================================================================
-int main(void)
-{
+int main(void) {
     internal_clock();
-
-    // Uncomment autotest to get the confirmation code.
-    autotest();
-
-    // Demonstrate part 1
-// #define TEST_TIMER3
-#ifdef TEST_TIMER3
-    setup_tim3();
-    for (;;)
-    {
-    }
-#endif
-
-    // Initialize the display to something interesting to get started.
-    msg[0] |= font['E'];
-    msg[1] |= font['C'];
-    msg[2] |= font['E'];
-    msg[3] |= font[' '];
-    msg[4] |= font['3'];
-    msg[5] |= font['6'];
-    msg[6] |= font['2'];
-    msg[7] |= font[' '];
-
-    enable_ports();
+    int hundreds = 0;
+    int tens = 0;
+    int ones = 0;
+    int rpm_val;
+    int hr, tens_min, ones_min;
+    int time_left;
+    hr = 9;
+    ones_min = 9;
+    tens_min = 9;
+    float roto_so_far = 0;
+    msg[0] |= font['T'];
+    msg[1] |= font['L'];
+    msg[2] |= font[' '];
+    msg[3] |= font['0'];
+    msg[4] |= font['h'];
+    msg[5] |= font['r'];
+    msg[6] |= font['0'];
+    msg[7] |= font['0'];
+    //ascii ' ' is 32
+    //ascii 0 is 48
+    enable_7SEG_ports();
+    init_spi1();
+    spi1_init_oled();
+    spi1_setup_dma();
+    spi1_enable_dma();
+    setup_adc();
+    init_tim2();
     setup_dma();
     enable_dma();
     init_tim15();
-    init_tim7();
-    setup_adc();
-    init_tim2();
-    init_wavetable();
-    init_tim6();
+    mode[25] = 0x200+ (char)(hundreds+48);//hundreds either 1 or 0
+    mode[26] = 0x200+ (char)(tens+48);
+    mode[27] = 0x200+ (char)(ones+48);
+    while(1){
+        nano_wait(10000000000); //this is one sec
+        rpm_val = adc_to_rpm(adc_val);
+        
+        // roto_so_far += (rpm_val / 60); //adds the rotations turned over last second
+        // time_left = (800.0 - roto_so_far) / ((float)(rpm_val+10));
+        
+        // hr = time_left / 60;
+        // tens_min = (time_left % 60) / 10;
+        // ones_min = (time_left % 10);
 
-    setup_tim1();
-
-    // demonstrate part 2
-// #define TEST_TIM1
-#ifdef TEST_TIM1
-    for (;;)
-    {
-        // Breathe in...
-        for (float x = 1; x < 2400; x *= 1.1)
+        hr -= 1;
+        tens_min -= 1;
+        ones_min -= 1;
+        if(hr == -1)
         {
-            TIM1->CCR1 = TIM1->CCR2 = TIM1->CCR3 = 2400 - x;
-            nano_wait(100000000);
+            hr = 10;
+            tens_min = 10;
+            ones_min = 10;
         }
-        // ...and out...
-        for (float x = 2400; x >= 1; x /= 1.1)
-        {
-            TIM1->CCR1 = TIM1->CCR2 = TIM1->CCR3 = 2400 - x;
-            nano_wait(100000000);
-        }
-        // ...and start over.
+        hundreds = rpm_val / 100;
+        tens = rpm_val / 10;
+        ones = rpm_val % 10;
+        //oled spi below
+        mode[25] = 0x200+ (char)(hundreds+48);//hundreds either 1 or 0
+        mode[26] = 0x200+ (char)(tens+48);
+        mode[27] = 0x200+ (char)(ones+48);
+        //7 seg below
+        // total_roto / rpm_val = 
+        msg[0] |= font['T'];
+        msg[1] |= font['L'];
+        msg[2] |= font[' '];
+        msg[3] |= font[(char)(hr + 48)];
+        msg[4] |= font['h'];
+        msg[5] |= font['r'];
+        msg[6] |= font[(char)(tens_min+48)];
+        msg[7] |= font[(char)(ones_min+48)];
     }
-#endif
-
-    // demonstrate part 3
-// #define MIX_TONES
-#ifdef MIX_TONES
-    set_freq(0, 1000);
-    for (;;)
-    {
-        char key = get_keypress();
-        if (key == 'A')
-            set_freq(0, getfloat());
-        if (key == 'B')
-            set_freq(1, getfloat());
-    }
-#endif
-
-    // demonstrate part 4
-// #define TEST_SETRGB
-#ifdef TEST_SETRGB
-    for (;;)
-    {
-        char key = get_keypress();
-        if (key == 'A')
-            set_freq(0, getfloat());
-        if (key == 'B')
-            set_freq(1, getfloat());
-        if (key == 'D')
-            setrgb(getrgb());
-    }
-#endif
-
-    // Have fun.
-    dialer();
 }
