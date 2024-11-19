@@ -234,34 +234,40 @@ void init_tim15(void)
     TIM15->CR1 |= 0x1;
 }
 
-void TIM7_IRQHandler(void)
-{
-    TIM7->SR &= ~TIM_SR_UIF;
-    roto_so_far += (((float)rpm_val) / 60.0);
-}
+// void TIM7_IRQHandler(void)
+// {
+//     TIM7->SR &= ~TIM_SR_UIF;
+//     roto_so_far += (((float)rpm_val) / 60.0);
+// }
 
-/**
- * @brief Setup timer 7 as described in lab handout
- * 
- */
-void setup_tim7() {
-    RCC->APB1ENR |= RCC_APB1ENR_TIM7EN;
-    TIM7->ARR = 999999;
-    TIM7->PSC = 47;
-    TIM7->DIER |= TIM_DIER_UIE;
-    NVIC->ISER[0] = 1 << TIM7_IRQn;
-    TIM7->CR1 |= TIM_CR1_CEN;
-}
+// /**
+//  * @brief Setup timer 7 as described in lab handout
+//  * 
+//  */
+// void setup_tim7() {
+//     RCC->APB1ENR |= RCC_APB1ENR_TIM7EN;
+//     TIM7->ARR = 999999;
+//     TIM7->PSC = 47;
+//     TIM7->DIER |= TIM_DIER_UIE;
+//     NVIC->ISER[0] = 1 << TIM7_IRQn;
+//     TIM7->CR1 |= TIM_CR1_CEN;
+// }
+
+int hundreds = 0;
+int tens = 0;
+int ones = 0;
+int hr, tens_min, ones_min;
+int time_left;
 
 int main(void)
 {
     internal_clock();
+    float roto_so_far = 0;
     int hundreds = 0;
     int tens = 0;
     int ones = 0;
     int hr, tens_min, ones_min;
     int time_left;
-    roto_so_far = 0;
     msg[0] |= font['T'];
     msg[1] |= font['L'];
     msg[2] |= font[' '];
@@ -282,7 +288,7 @@ int main(void)
     setup_dma();
     enable_dma();
     init_tim15();
-    setup_tim7();
+    // setup_tim7();
     mode[25] = 0x200 + (char)(hundreds + 48); // hundreds either 1 or 0
     mode[26] = 0x200 + (char)(tens + 48);
     mode[27] = 0x200 + (char)(ones + 48);
@@ -290,7 +296,7 @@ int main(void)
     {
         nano_wait(1000000000); // this is one sec
         rpm_val = adc_to_rpm(adc_val);
-
+        roto_so_far += (((float)rpm_val) / 60.0);
         time_left = (800.0 - roto_so_far) / (((float)(rpm_val)) + .001);
 
         hr = time_left / 60;
