@@ -120,7 +120,13 @@ void spi1_enable_dma(void)
 int adc_to_rpm(int adc)
 {
     // adc 0->4095
-    return (int)(((float)adc) / 40.95);
+    return (((adc * 1.2) - 2048) / 250) + 5;
+}
+
+int adc_to_rpm_norm(int adc)
+{
+    // adc 0->4095
+    return (int)(adc / 4);
 }
 
 void setup_adc(void)
@@ -220,6 +226,20 @@ void enable_dma(void)
     DMA1_Channel5->CCR |= (0x1);
 }
 
+void setup_tim1(void)
+{   
+    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+    GPIOA->MODER |= GPIO_MODER_MODER8_1;
+    GPIOA->AFR[1] |= 0x2 << 0;
+    TIM1->BDTR |= TIM_BDTR_MOE;
+    TIM1->PSC = 0;
+    TIM1->ARR = 999;
+    TIM1->CCMR1 |= 0b110 << 4;
+    TIM1->CCER |= 1 << 0;
+    TIM1->CR1 |= TIM_CR1_CEN;  
+}
+
 //============================================================================
 // init_tim15()
 //============================================================================
@@ -234,31 +254,6 @@ void init_tim15(void)
     TIM15->CR1 |= 0x1;
 }
 
-// void TIM7_IRQHandler(void)
-// {
-//     TIM7->SR &= ~TIM_SR_UIF;
-//     roto_so_far += (((float)rpm_val) / 60.0);
-// }
-
-// /**
-//  * @brief Setup timer 7 as described in lab handout
-//  * 
-//  */
-// void setup_tim7() {
-//     RCC->APB1ENR |= RCC_APB1ENR_TIM7EN;
-//     TIM7->ARR = 999999;
-//     TIM7->PSC = 47;
-//     TIM7->DIER |= TIM_DIER_UIE;
-//     NVIC->ISER[0] = 1 << TIM7_IRQn;
-//     TIM7->CR1 |= TIM_CR1_CEN;
-// }
-
-int hundreds = 0;
-int tens = 0;
-int ones = 0;
-int hr, tens_min, ones_min;
-int time_left;
-
 int main(void)
 {
     internal_clock();
@@ -266,6 +261,7 @@ int main(void)
     int hundreds = 0;
     int tens = 0;
     int ones = 0;
+    int rpm_norm;
     int hr, tens_min, ones_min;
     int time_left;
     msg[0] |= font['T'];
@@ -288,7 +284,7 @@ int main(void)
     setup_dma();
     enable_dma();
     init_tim15();
-    // setup_tim7();
+    setup_tim1();
     mode[25] = 0x200 + (char)(hundreds + 48); // hundreds either 1 or 0
     mode[26] = 0x200 + (char)(tens + 48);
     mode[27] = 0x200 + (char)(ones + 48);
@@ -296,6 +292,12 @@ int main(void)
     {
         nano_wait(1000000000); // this is one sec
         rpm_val = adc_to_rpm(adc_val);
+        
+        rpm_norm = adc_to_rpm_norm(adc_val);        
+        if(rpm_norm > 1000){
+            rpm_norm = 1000;
+        }
+        TIM1->CCR1 = (1000 - rpm_norm);
         roto_so_far += (((float)rpm_val) / 60.0);
         time_left = (800.0 - roto_so_far) / (((float)(rpm_val)) + .001);
 
@@ -331,9 +333,9 @@ int main(void)
             msg[0] |= font['T'];
             msg[1] |= font['L'];
             msg[2] |= font[' '];
-            msg[3] |= font[(char)(hr + 48)];
-            msg[4] |= font['h'];
+            msg[4] |= font['H'];
             msg[5] |= font['r'];
+            msg[3] |= font[(char)(hr + 48)];
             msg[6] |= font[(char)(tens_min + 48)];
             msg[7] |= font[(char)(ones_min + 48)];
         }
