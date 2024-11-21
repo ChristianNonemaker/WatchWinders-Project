@@ -1,20 +1,3 @@
-/**
- ******************************************************************************
- * @file    main.c
- * @author  Weili An, Niraj Menon
- * @date    Jan 31 2024
- * @brief   ECE 362 Lab 5 Student template
- ******************************************************************************
- */
-
-/*******************************************************************************/
-
-// Fill out your username, otherwise your completion code will have the
-// wrong username!
-const char *username = "kolb16";
-
-/*******************************************************************************/
-
 #include "stm32f0xx.h"
 #include <math.h> // for M_PI
 #include <stdio.h>
