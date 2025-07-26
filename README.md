@@ -3,7 +3,12 @@
 ## STM32F9 Microcontroller Programmed to Wind a Watch
 
 ### Project Overview
-The WatchWinders project demonstrates the use of an STM32F9 microcontroller for automating the winding of a mechanical watch. The system dynamically controls the winding speed (RPM) using PWM signals derived from ADC inputs, calculates the time remaining based on rotations, and displays this information on an OLED and 7-segment display.
+The WatchWinders project demonstrates the use of an STM32F9 microcontroller for automating the winding of a mechanical watch. The system dynamically controls the winding speed (RPM) using PWM signals derived from ADC inputs, calculates the time remaining based on rotations, and displays this information on an OLED and 7-segment display.  If more interested download the demo video in the repository for a full understanding of the embedded controller and surrounding circuitry.
+
+---
+
+### Watch Winder in Action!
+![WatchWinders Demo](demo.gif)
 
 ---
 
